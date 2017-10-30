@@ -1,0 +1,156 @@
+<?php
+/**
+ * @file
+ * Contains metro_notifications.module..
+ */
+use Drupal\Core\Routing\RouteMatchInterface;
+use Drupal\metro_notifications\MetroNotificationsHelper;
+use Drupal\Component\Utility\SafeMarkup;
+use Drupal\Core\Entity\EntityInterface;
+use Drupal\node\Entity\Node;
+use Drupal\group\Entity\Group;
+
+/**
+ * Implements hook_help().
+ *
+ * @inheritdoc
+ */
+function metro_notifications_help($route_name, RouteMatchInterface $route_match) {
+  switch ($route_name) {
+    case 'help.page.metro_notifications':
+      $output = '';
+      $output .= '<h3>' . t('About') . '</h3>';
+
+      return $output;
+  }
+}
+
+/**
+ * Implements hook_mail().
+ */
+function metro_notifications_mail($key, &$message, $params) {
+  $options = array(
+    'langcode' => $message['langcode'],
+  );
+
+  switch ($key) {
+    case 'metro_updates':
+      $message['from'] = \Drupal::config('system.site')->get('mail');
+      $message['subject'] = t('Metro weekly updates');
+      $message['body'][] = SafeMarkup::checkPlain($params['message']);
+      break;
+
+    case 'metro_document_update':
+      $message['from'] = \Drupal::config('system.site')->get('mail');
+      $message['subject'] = t('Document has been updated');
+      $message['body'][] = SafeMarkup::checkPlain($params['message']);
+      break;
+  }
+}
+
+/**
+ * Implements hook_cron()
+ */
+function metro_notifications_cron() {
+  $lastMonday = strtotime("last week monday");
+  $lastSunday = strtotime("last week monday +7 days");
+  //kint($lastMonday);
+  //kint($lastSunday);
+  //kint(MetroNotificationsHelper::getEmailNotifications($uid =17, $lastMonday, $lastSunday));
+
+  $query = \Drupal::database()->select('users_field_data', 'u');
+  $query->fields('u', array('uid'));
+  $query->condition('u.status', 1, '=');
+  $uids = $query->execute()->fetchCol();
+
+  foreach ($uids  as $uid) {
+    $user = \Drupal\user\Entity\User::load($uid);
+    $mailManager = \Drupal::service('plugin.manager.mail');
+    $module = 'metro notifications';
+    $key = 'metro_updates';
+    $to = $user->getEmail();
+    $params['message'] = MetroNotificationsHelper::getEmailNotifications($uid, $lastMonday, $lastSunday);
+    //$params['node_title'] = $entity->label();
+    $langcode = $user->getPreferredLangcode();
+    $send = TRUE;
+    $result = $mailManager->mail($module, $key, $to, $langcode, $params, NULL, $send);
+    if ($result['result'] !== TRUE) {
+      drupal_set_message(t('There was a problem sending your message and it was not sent.'), 'error');
+    }
+    else {
+      drupal_set_message(t('Your message has been sent.'));
+    }
+  }
+  //exit;
+}
+
+/**
+ * Implements hook_node_insert()
+ * @param \Drupal\Core\Entity\EntityInterface $entity
+ */
+function metro_notifications_node_update(EntityInterface $entity) {
+  if ($entity->getType() == 'document' && $entity->get('field_send_notification')->value) {
+    //kint($entity->id());
+    $banners = $entity->get('field_ref_banner')->getValue();
+
+    // To get the list of all qualified users to receive email notification
+    // for a particular document node(document), we need to
+    // first get all the merchants attached to the banners listed in this node(document) and
+    // then get all the users attached to those merchants.
+
+
+    //Get all the merchants of the associated banners of this node(document)
+    $merchants = [];
+    foreach($banners as $banner) {
+      $merchants_of_a_banner = MetroNotificationsHelper::getAllMarchantsOfBanner($banner);
+      $merchants = array_merge_recursive($merchants, $merchants_of_a_banner);
+    }
+    $merchants = array_unique($merchants);
+
+    //Get all the users for above gathered merchants
+    $users = [];
+    foreach ($merchants as $merchant) {
+      $users_of_a_merchant = MetroNotificationsHelper::getAllUsersOfMarchant($merchant);
+      $users = array_merge_recursive($users, $users_of_a_merchant);
+    }
+    //kint($users);
+
+    foreach ($users  as $uid) {
+      $user = \Drupal\user\Entity\User::load($uid);
+      $mailManager = \Drupal::service('plugin.manager.mail');
+      $module = 'metro notifications';
+      $key = 'metro_document_update';
+      $to = $user->getEmail();
+      $params['message'] = t('The following document has been updated : ') . $entity->getTitle();
+      //$params['node_title'] = $entity->label();
+      $langcode = $user->getPreferredLangcode();
+      $send = TRUE;
+      $result = $mailManager->mail($module, $key, $to, $langcode, $params, NULL, $send);
+      if ($result['result'] !== TRUE) {
+        drupal_set_message(t('There was a problem sending your message and it was not sent.'), 'error');
+      }
+      else {
+        drupal_set_message(t('Your message has been sent.'));
+      }
+    }
+   // exit;
+  }
+  //$node = Node::load($nid);
+  /*if ($node->hasTranslation($langcode)) {
+    $localized = \Drupal::service('entity.repository')
+      ->getTranslationFromContext($node, $langcode);
+  }*/
+}
+
+/**
+ * Implements hook_theme().
+ */
+function metro_notifications_theme($existing, $type, $theme, $path) {
+  return [
+    'listing' => [
+      'variables' => [
+        'all_notifications'  => [],
+      ],
+    ],
+  ];
+}

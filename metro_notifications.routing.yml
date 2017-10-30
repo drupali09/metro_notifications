@@ -1,0 +1,7 @@
+metro_notifications.content:
+  path: 'metro_notification/list/{term}'
+  defaults:
+    _controller: '\Drupal\metro_notifications\Controller\MetroNotificationsController::notificationListing'
+    _title: 'All notifications'
+  requirements:
+    _permission: 'access content'
